@@ -1443,6 +1443,26 @@ static void bgp_zebra_announce_parse_nexthop(
 					      mpinfo->attr->srv6_l3vpn
 						      ->transposition_len);
 			}
+			/* for explicit sid */
+			if (mpinfo->attr->srv6_l3vpn && !CHECK_FLAG(api.flags, ZEBRA_FLAG_EVPN_ROUTE)) {
+				if (!sid_zero(&mpinfo->attr->srv6_l3vpn->sid)) {
+					memcpy(&api_nh->seg6_segs[0], &mpinfo->attr->srv6_l3vpn->sid,
+						sizeof(api_nh->seg6_segs[0]));
+
+					if (peer->status == Established && peer->su_local->sa.sa_family == AF_INET6)
+						memcpy(&api_nh->seg6_src, &peer->su_local->sin6.sin6_addr,
+							sizeof(api_nh->seg6_src));
+
+					if (mpinfo->attr->srv6_l3vpn->transposition_len != 0) {
+						if (!bgp_is_valid_label(
+								&mpinfo->extra->label[0]))
+							continue;
+					}
+					SET_FLAG(api_nh->flags, ZAPI_NEXTHOP_FLAG_SEG6);
+					UNSET_FLAG(api.flags, ZEBRA_FLAG_ALLOW_RECURSION);
+					allow_recursion = false;
+				}
+			}
 
 			api_nh->seg_num = 1;
 			SET_FLAG(api_nh->flags, ZAPI_NEXTHOP_FLAG_SEG6);
@@ -3647,18 +3667,139 @@ static int bgp_zebra_srv6_sid_notify(ZAPI_CALLBACK_ARGS)
 	return 0;
 }
 
+static void bgp_zebra_process_srv6_locator_sid(ZAPI_CALLBACK_ARGS)
+{
+    struct stream *s = NULL;
+    struct bgp *bgp = bgp_get_default();
+    uint16_t len = 0;
+    char loc_name[SRV6_LOCNAME_SIZE] = {0};
+    struct srv6_locator *loc = NULL;
+
+    s = zclient->ibuf;
+    STREAM_GETW(s, len);
+    if (len > SRV6_LOCNAME_SIZE)
+    {
+        zlog_err("error locator name len:%d", len);
+        return;
+    }
+    if (!bgp)
+        return;
+
+    STREAM_GET(loc_name, s, len);
+
+    loc = locator_lookup_by_name(bgp->srv6_locators_hash, loc_name);
+    if (!loc)
+    {
+        loc = srv6_locator_new();
+        loc->chunks = list_new();
+        loc->chunks->del = (void (*)(void *))srv6_locator_chunk_free;
+        loc->sids = list_new();
+
+        strncpy(loc->name, loc_name, len);
+        listnode_add(bgp->srv6_locators, loc);
+        hash_get(bgp->srv6_locators_hash, loc, hash_alloc_intern);
+    }
+    STREAM_GETW(s, loc->prefix.prefixlen);
+    STREAM_GET(&loc->prefix.prefix, s, sizeof(loc->prefix.prefix));
+    loc->prefix.family = AF_INET6;
+    STREAM_GETC(s, loc->block_bits_length);
+    STREAM_GETC(s, loc->node_bits_length);
+    STREAM_GETC(s, loc->function_bits_length);
+    STREAM_GETC(s, loc->argument_bits_length);
+
+    if (zapi_srv6_locator_sid_decode(s, loc->sids) < 0)
+    {
+        zlog_err("can not find the locator by name :%s", loc_name);
+        return;
+    }
+/* todo: ����sid export�仯 */
+    /* post-change: re-export vpn routes */
+    vpn_leak_postchange_checksid();
+
+stream_failure:
+    return;
+
+}
+
+static void bgp_zebra_process_srv6_del_sid(ZAPI_CALLBACK_ARGS)
+{
+	struct stream *s = NULL;
+	struct bgp *bgp = bgp_get_default();
+    uint16_t len = 0;
+    char loc_name[SRV6_LOCNAME_SIZE] = {0};
+    struct srv6_locator *loc = NULL;
+
+	s = zclient->ibuf;
+    STREAM_GETW(s, len);
+	if (len > SRV6_LOCNAME_SIZE)
+	{
+        zlog_err("error locator name len:%d", len);
+		return;
+	}
+
+    if (!bgp)
+        return;
+
+	STREAM_GET(loc_name, s, len);
+    loc = locator_lookup_by_name(bgp->srv6_locators_hash, loc_name);
+    if (!loc)
+	{
+        zlog_err("can not find the locator by name :%s", loc_name);
+		return;
+	}
+    if (zapi_srv6_del_sid_decode(s, loc->sids) < 0)
+    {
+        zlog_err("can not find the locator by name :%s", loc_name);
+		return;
+    }
+
+/* todo: ����sid export�仯 */
+	vpn_leak_postchange_checksid();
+
+stream_failure:
+	return;
+
+}
+
 static int bgp_zebra_process_srv6_locator_add(ZAPI_CALLBACK_ARGS)
 {
-	struct srv6_locator loc = {};
+	struct srv6_locator *loc = NULL;
+	struct srv6_locator *loctmp = NULL;
 	struct bgp *bgp = bgp_get_default();
+	const char *loc_name = NULL;
 
-	if (!bgp || !bgp->srv6_enabled)
+	if(!bgp)
 		return 0;
+	loc_name = bgp->srv6_locator_name;
+	loc = srv6_locator_new();
 
-	if (zapi_srv6_locator_decode(zclient->ibuf, &loc) < 0)
+	if (zapi_srv6_locator_decode(zclient->ibuf, loc) < 0)
 		return -1;
 
-	return bgp_zebra_process_srv6_locator_internal(&loc);
+	loctmp = locator_lookup_by_name(bgp->srv6_locators_hash, loc->name);
+	if (loctmp == NULL)
+	{
+		loc->chunks = list_new();
+		loc->chunks->del = (void (*)(void *))srv6_locator_chunk_free;
+		loc->sids = list_new();
+		listnode_add(bgp->srv6_locators, loc);
+		hash_get(bgp->srv6_locators_hash, loc, hash_alloc_intern);
+	}
+	else
+	{
+		loctmp->prefix = loc->prefix;
+		loctmp->block_bits_length = loc->block_bits_length;
+		loctmp->node_bits_length = loc->node_bits_length;
+		loctmp->function_bits_length = loc->function_bits_length;
+		loctmp->argument_bits_length = loc->argument_bits_length;
+		// loctmp->format = loc->format;
+		srv6_locator_del(loc);
+	}
+
+	if (bgp_zebra_srv6_manager_get_locator_chunk(loc_name) < 0)
+		return -1;
+
+	return 0;
 }
 
 static int bgp_zebra_process_srv6_locator_delete(ZAPI_CALLBACK_ARGS)
@@ -3833,6 +3974,8 @@ static zclient_handler *const bgp_handlers[] = {
 	[ZEBRA_SRV6_MANAGER_GET_LOCATOR_CHUNK] =
 		bgp_zebra_process_srv6_locator_chunk,
 	[ZEBRA_SRV6_SID_NOTIFY] = bgp_zebra_srv6_sid_notify,
+	[ZEBRA_SRV6_MANAGER_GET_LOCATOR_SID] = bgp_zebra_process_srv6_locator_sid,
+	[ZEBRA_SRV6_MANAGER_RELEASE_LOCATOR_SID] = bgp_zebra_process_srv6_del_sid,
 };
 
 static int bgp_if_new_hook(struct interface *ifp)
@@ -4536,4 +4679,9 @@ void bgp_zebra_release_label_range(uint32_t start, uint32_t end)
 	ret = lm_release_label_chunk(zclient_sync, start, end);
 	if (ret < 0)
 		zlog_warn("%s: error releasing label range!", __func__);
+}
+
+int bgp_zebra_srv6_manager_get_locator_sid(const char *name)
+{
+	return srv6_manager_get_locator_sid(zclient, name);
 }

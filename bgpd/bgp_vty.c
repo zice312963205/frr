@@ -10059,10 +10059,11 @@ DEFPY (af_sid_vpn_export,
 	}
 
 	if (bgp->tovpn_sid_index != 0 ||
-	    CHECK_FLAG(bgp->vrf_flags, BGP_VRF_TOVPN_SID_AUTO)) {
+	    CHECK_FLAG(bgp->vrf_flags, BGP_VRF_TOVPN_SID_AUTO) ||
+		CHECK_FLAG(bgp->vrf_flags, BGP_VRF_TOVPN_SID_EXPLICIT)) {
 		vty_out(vty,
-			"per-vrf sid and per-af sid are mutually exclusive\n"
-			"Failed: per-vrf sid is configured. Remove per-vrf sid before configuring per-af sid\n");
+			"per-vrf sid, per-af sid and explicit sid are mutually exclusive\n"
+			"Failed: per-vrf sid or explicit sid is configured. Remove it before configuring per-af sid\n");
 		return CMD_WARNING_CONFIG_FAILED;
 	}
 
@@ -10141,10 +10142,11 @@ DEFPY (bgp_sid_vpn_export,
 		       BGP_VPN_POLICY_TOVPN_SID_AUTO) ||
 	    bgp->vpn_policy[AFI_IP6].tovpn_sid_index != 0 ||
 	    CHECK_FLAG(bgp->vpn_policy[AFI_IP6].flags,
-		       BGP_VPN_POLICY_TOVPN_SID_AUTO)) {
+		       BGP_VPN_POLICY_TOVPN_SID_AUTO) ||
+		CHECK_FLAG(bgp->vrf_flags, BGP_VRF_TOVPN_SID_EXPLICIT)) {
 		vty_out(vty,
-			"per-vrf sid and per-af sid are mutually exclusive\n"
-			"Failed: per-af sid is configured. Remove per-af sid before configuring per-vrf sid\n");
+			"per-vrf sid, per-af sid and explicit sid are mutually exclusive\n"
+			"Failed: per-af sid or explicit sid is configured. Remove it before configuring per-vrf sid\n");
 		return CMD_WARNING_CONFIG_FAILED;
 	}
 
@@ -10882,6 +10884,97 @@ DEFPY (bgp_srv6_locator,
 	ret = bgp_zebra_srv6_manager_get_locator(name);
 	if (ret < 0)
 		return CMD_WARNING_CONFIG_FAILED;
+
+	return CMD_SUCCESS;
+}
+
+DEFPY (bgp_srv6_locator_static,
+       bgp_srv6_locator_static_cmd,
+       "srv6-locator-static NAME$name",
+       "Specify SRv6 locator\n"
+       "Specify SRv6 locator\n")
+{
+	VTY_DECLVAR_CONTEXT(bgp, bgp);
+	int ret;
+    struct srv6_locator *locator = NULL;
+    struct bgp *bgp_vpn = bgp_get_default();
+
+	if (bgp->vpn_policy[AFI_IP].tovpn_sid_index != 0  ||
+	    CHECK_FLAG(bgp->vpn_policy[AFI_IP].flags,
+		       BGP_VPN_POLICY_TOVPN_SID_AUTO)         ||
+		bgp->vpn_policy[AFI_IP6].tovpn_sid_index != 0 ||
+		CHECK_FLAG(bgp->vpn_policy[AFI_IP6].flags,
+		       BGP_VPN_POLICY_TOVPN_SID_AUTO)         ||
+		bgp->tovpn_sid_index != 0                     ||
+	    CHECK_FLAG(bgp->vrf_flags, BGP_VRF_TOVPN_SID_AUTO)) {
+		vty_out(vty,
+			"per-vrf sid, per-af sid and static sid are mutually exclusive\n"
+			"Failed: per-vrf sid or per-af sid is configured. Remove it before configuring static sid\n");
+		return CMD_WARNING_CONFIG_FAILED;
+	}
+
+	if (strlen(bgp->srv6_locator_name) > 0
+	    && strcmp(name, bgp->srv6_locator_name) != 0) {
+		vty_out(vty, "srv6 locator is already configured\n");
+		return CMD_WARNING_CONFIG_FAILED;
+	}
+
+	SET_FLAG(bgp->vrf_flags, BGP_VRF_TOVPN_SID_STATIC);
+
+	snprintf(bgp->srv6_locator_name,
+		 sizeof(bgp->srv6_locator_name), "%s", name);
+    bgp->srv6_enabled = true;
+    if (!bgp_vpn)
+        return CMD_SUCCESS;
+    locator = locator_lookup_by_name(bgp_vpn->srv6_locators_hash, bgp->srv6_locator_name);
+    if (!locator)
+    {
+        ret = bgp_zebra_srv6_manager_get_locator_sid(name);
+    	if (ret < 0)
+    		return CMD_WARNING_CONFIG_FAILED;
+    }
+    else{
+        vpn_leak_postchange(BGP_VPN_POLICY_DIR_TOVPN, AFI_IP,
+                    bgp_get_default(), bgp);
+		vpn_leak_postchange(BGP_VPN_POLICY_DIR_TOVPN, AFI_IP6,
+                    bgp_get_default(), bgp);
+    }
+
+	return CMD_SUCCESS;
+}
+
+DEFPY (no_bgp_srv6_locator_static,
+       no_bgp_srv6_locator_static_cmd,
+       "no srv6-locator-static NAME$name",
+       NO_STR
+       "Specify SRv6 locator\n"
+       "Specify SRv6 locator\n")
+{
+	VTY_DECLVAR_CONTEXT(bgp, bgp);
+
+	/* when locator isn't configured, do nothing */
+	if (strlen(bgp->srv6_locator_name) < 1)
+		return CMD_SUCCESS;
+
+	/* name validation */
+	if (strcmp(name, bgp->srv6_locator_name) != 0) {
+		vty_out(vty, "%% No srv6 locator is configured\n");
+		return CMD_WARNING_CONFIG_FAILED;
+	}
+
+	if (CHECK_FLAG(bgp->vrf_flags, BGP_VRF_TOVPN_SID_STATIC))
+		UNSET_FLAG(bgp->vrf_flags, BGP_VRF_TOVPN_SID_STATIC);
+
+	/* post-change */
+	vpn_leak_postchange(BGP_VPN_POLICY_DIR_TOVPN, AFI_IP, bgp_get_default(),
+			    bgp);
+	vpn_leak_postchange(BGP_VPN_POLICY_DIR_TOVPN, AFI_IP6,
+			    bgp_get_default(), bgp);
+
+	/* clear locator name */
+    memset(bgp->srv6_locator_name, 0, sizeof(bgp->srv6_locator_name));
+	
+	bgp->srv6_enabled = false;
 
 	return CMD_SUCCESS;
 }
@@ -21933,6 +22026,8 @@ void bgp_vty_init(void)
 	install_element(BGP_NODE, &no_bgp_segment_routing_srv6_cmd);
 	install_element(BGP_SRV6_NODE, &bgp_srv6_locator_cmd);
 	install_element(BGP_SRV6_NODE, &no_bgp_srv6_locator_cmd);
+	install_element(BGP_NODE, &bgp_srv6_locator_static_cmd);
+	install_element(BGP_NODE, &no_bgp_srv6_locator_static_cmd);
 	install_element(BGP_IPV4_NODE, &af_sid_vpn_export_cmd);
 	install_element(BGP_IPV6_NODE, &af_sid_vpn_export_cmd);
 	install_element(BGP_NODE, &bgp_sid_vpn_export_cmd);

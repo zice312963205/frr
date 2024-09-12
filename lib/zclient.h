@@ -209,6 +209,8 @@ typedef enum {
 	ZEBRA_SRV6_LOCATOR_DELETE,
 	ZEBRA_SRV6_MANAGER_GET_LOCATOR_CHUNK,
 	ZEBRA_SRV6_MANAGER_RELEASE_LOCATOR_CHUNK,
+	ZEBRA_SRV6_MANAGER_GET_LOCATOR_SID,
+	ZEBRA_SRV6_MANAGER_RELEASE_LOCATOR_SID,
 	ZEBRA_SRV6_MANAGER_GET_LOCATOR,
 	ZEBRA_SRV6_MANAGER_GET_SRV6_SID,
 	ZEBRA_SRV6_MANAGER_RELEASE_SRV6_SID,
@@ -1121,6 +1123,8 @@ extern int srv6_manager_get_sid(struct zclient *zclient,
 extern int srv6_manager_release_sid(struct zclient *zclient,
 				    const struct srv6_sid_ctx *ctx);
 
+extern int srv6_manager_get_locator_sid(struct zclient *zclient,
+				   const char *locator_name);
 extern enum zclient_send_status zebra_send_sr_policy(struct zclient *zclient,
 						     int cmd,
 						     struct zapi_sr_policy *zp);
@@ -1144,6 +1148,9 @@ extern int zapi_srv6_locator_chunk_encode(struct stream *s,
 					  const struct srv6_locator_chunk *c);
 extern int zapi_srv6_locator_chunk_decode(struct stream *s,
 					  struct srv6_locator_chunk *c);
+extern int zapi_srv6_locator_sid_encode(struct stream *s, struct srv6_locator *loc);
+extern int zapi_srv6_locator_sid_decode(struct stream *s, struct list *sidlist);
+extern int zapi_srv6_del_sid_decode(struct stream *s, struct list *sidlist);
 
 extern enum zclient_send_status zebra_send_pw(struct zclient *zclient,
 					      int command, struct zapi_pw *pw);
