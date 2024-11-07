@@ -1412,6 +1412,8 @@ int bgp_global_gr_init(struct bgp *bgp)
 		bgp->rib_stale_time = bm->rib_stale_time;
 	if (CHECK_FLAG(bm->flags, BM_FLAG_GR_PRESERVE_FWD))
 		SET_FLAG(bgp->flags, BGP_FLAG_GR_PRESERVE_FWD);
+	if (CHECK_FLAG(bm->flags, BM_FLAG_IPV6_NO_AUTO_RA))
+		SET_FLAG(bgp->flags, BGP_FLAG_IPV6_NO_AUTO_RA);
 
 	bgp->present_zebra_gr_state = ZEBRA_GR_DISABLE;
 
@@ -4220,8 +4222,6 @@ int bgp_delete(struct bgp *bgp)
 
 	if (bgp->process_queue)
 		work_queue_free_and_null(&bgp->process_queue);
-
-	event_master_free_unused(bm->master);
 
 	if (!IS_BGP_INSTANCE_HIDDEN(bgp))
 		bgp_unlock(bgp); /* initial reference */

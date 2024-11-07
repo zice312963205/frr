@@ -2327,6 +2327,9 @@ void bgp_zebra_initiate_radv(struct bgp *bgp, struct peer *peer)
 {
 	uint32_t ra_interval = BGP_UNNUM_DEFAULT_RA_INTERVAL;
 
+	if (CHECK_FLAG(bgp->flags, BGP_FLAG_IPV6_NO_AUTO_RA))
+		return;
+
 	/* Don't try to initiate if we're not connected to Zebra */
 	if (zclient->sock < 0)
 		return;
@@ -3696,7 +3699,7 @@ static int bgp_zebra_process_srv6_locator_delete(ZAPI_CALLBACK_ARGS)
 	// refresh functions
 	for (ALL_LIST_ELEMENTS(bgp->srv6_functions, node, nnode, func)) {
 		tmp_prefi.family = AF_INET6;
-		tmp_prefi.prefixlen = 128;
+		tmp_prefi.prefixlen = IPV6_MAX_BITLEN;
 		tmp_prefi.prefix = func->sid;
 		if (prefix_match((struct prefix *)&loc.prefix,
 				 (struct prefix *)&tmp_prefi)) {
@@ -3714,7 +3717,7 @@ static int bgp_zebra_process_srv6_locator_delete(ZAPI_CALLBACK_ARGS)
 		tovpn_sid = bgp_vrf->vpn_policy[AFI_IP].tovpn_sid;
 		if (tovpn_sid) {
 			tmp_prefi.family = AF_INET6;
-			tmp_prefi.prefixlen = 128;
+			tmp_prefi.prefixlen = IPV6_MAX_BITLEN;
 			tmp_prefi.prefix = *tovpn_sid;
 			if (prefix_match((struct prefix *)&loc.prefix,
 					 (struct prefix *)&tmp_prefi))
@@ -3726,7 +3729,7 @@ static int bgp_zebra_process_srv6_locator_delete(ZAPI_CALLBACK_ARGS)
 		tovpn_sid = bgp_vrf->vpn_policy[AFI_IP6].tovpn_sid;
 		if (tovpn_sid) {
 			tmp_prefi.family = AF_INET6;
-			tmp_prefi.prefixlen = 128;
+			tmp_prefi.prefixlen = IPV6_MAX_BITLEN;
 			tmp_prefi.prefix = *tovpn_sid;
 			if (prefix_match((struct prefix *)&loc.prefix,
 					 (struct prefix *)&tmp_prefi))

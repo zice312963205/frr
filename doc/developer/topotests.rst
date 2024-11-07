@@ -1323,6 +1323,8 @@ You can run scripts inside the node, or use vtysh's <tab> or <?> feature.
   loc1                       1 2001:db8:1:1::/64        Up
   loc2                       2 2001:db8:2:2::/64        Up
 
+.. _writing-tests:
+
 Writing Tests
 """""""""""""
 
@@ -1347,9 +1349,9 @@ or using unified config (specifying which daemons to run is optional):
 
       for _, (rname, router) in enumerate(router_list.items(), 1):
          router.load_frr_config(os.path.join(CWD, "{}/frr.conf".format(rname)), [
-            TopoRouter.RD_ZEBRA
-            TopoRouter.RD_MGMTD,
-            TopoRouter.RD_BGP])
+            (TopoRouter.RD_ZEBRA, "-s 90000000"),
+            (TopoRouter.RD_MGMTD, None),
+            (TopoRouter.RD_BGP, None)]
 
 - The topology definition or build function
 
@@ -1408,7 +1410,7 @@ Requirements:
 - Always use IPv4 :rfc:`5737` (``192.0.2.0/24``, ``198.51.100.0/24``,
   ``203.0.113.0/24``) and IPv6 :rfc:`3849` (``2001:db8::/32``) ranges reserved
   for documentation;
-- Use unified config (``frr.conf``) for all new [tests](#writing-tests).
+- Use unified config (``frr.conf``) for all new tests. See :ref:`writing-tests`.
 
 Tips:
 
